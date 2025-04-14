@@ -47,9 +47,8 @@ def notify_slack(changes, added=True):
         print("[INFO] Slack通知成功")
 
 def main():
-    # テストデータ
-    current_titles = ["【テスト】画像投稿モニター"]
-    last_titles = []
+    current_titles = fetch_titles()
+    last_titles = load_last_titles()
 
     added = list(set(current_titles) - set(last_titles))
     removed = list(set(last_titles) - set(current_titles))
