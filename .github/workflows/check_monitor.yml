@@ -1,17 +1,16 @@
-name: Fancrew Monitor Check
+name: Monitor Tentame
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # 毎時15分間隔で実行
-  workflow_dispatch:        # 手動実行も可能
+    - cron: '0 * * * *'  # 毎時00分に実行
+  workflow_dispatch:
 
 jobs:
-  run-monitor:
+  check:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -21,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run monitor script
+      - name: Run monitor
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python check_monitor.py
+        run: python check_tentame.py
