@@ -7,7 +7,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 TARGET_URL = "https://www.tentame.net/project/"
