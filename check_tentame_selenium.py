@@ -1,106 +1,99 @@
+import json
+import time
+import os
+import requests
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-import json
-import os
-import time
-import requests
-from datetime import datetime
 
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")  # 環境変数に設定
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+LAST_PROJECTS_FILE = "last_projects.json"
 
 def fetch_projects():
+    print("🔍 Selenium による新着案件チェック...")
+
     options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
 
-    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+    driver = webdriver.Chrome(executable_path=ChromeDriverManager().install(), options=options)
     driver.get("https://www.tentame.net/project/")
-    time.sleep(5)
-    html = driver.page_source
-    driver.quit()
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = soup.select(".project_list .item")
-
-    print(f"✅ Selenium 取得件数: {len(items)}")
+    time.sleep(5)  # JavaScriptでの描画を待機（必要に応じて調整）
 
     projects = []
-    for item in items:
-        title_tag = item.select_one(".title")
-        img_tag = item.select_one("img")
-        if not title_tag:
-            continue
+    elements = driver.find_elements(By.CSS_SELECTOR, ".project-list .project-item")
 
-        title = title_tag.get_text(strip=True)
-        image_url = img_tag["src"] if img_tag else None
+    for elem in elements:
+        try:
+            title = elem.find_element(By.CSS_SELECTOR, ".project-title").text.strip()
+            image = elem.find_element(By.CSS_SELECTOR, "img").get_attribute("src")
+            link = elem.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+            projects.append({
+                "title": title,
+                "image": image,
+                "link": link,
+                "date": datetime.now().strftime("%Y-%m-%d")
+            })
+        except Exception as e:
+            print(f"⚠️ データ取得中にエラー: {e}")
 
-        projects.append({
-            "title": title,
-            "image": image_url
-        })
-
+    driver.quit()
     return projects
 
 def load_last_projects():
-    if os.path.exists("last_projects.json"):
-        with open("last_projects.json", "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                print("⚠️ JSONが壊れています。初期化します。")
-                return []
-    return []
+    if not os.path.exists(LAST_PROJECTS_FILE):
+        return []
+    with open(LAST_PROJECTS_FILE, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return []
 
 def save_last_projects(projects):
-    with open("last_projects.json", "w", encoding="utf-8") as f:
+    with open(LAST_PROJECTS_FILE, "w", encoding="utf-8") as f:
         json.dump(projects, f, ensure_ascii=False, indent=2)
 
-def send_to_slack(projects):
-    for p in projects:
-        payload = {
+def send_slack_notification(new_projects):
+    for p in new_projects:
+        message = {
             "attachments": [
                 {
                     "fallback": p["title"],
-                    "color": "#36a64f",
                     "title": p["title"],
+                    "title_link": p["link"],
                     "image_url": p["image"],
-                    "footer": f"tentame.net | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    "footer": f"掲載日: {p['date']}"
                 }
             ]
         }
-        response = requests.post(SLACK_WEBHOOK_URL, json=payload)
+        response = requests.post(SLACK_WEBHOOK_URL, json=message)
         if response.status_code != 200:
-            print(f"❌ Slack通知失敗: {response.text}")
+            print(f"❌ Slack通知失敗: {response.status_code}, {response.text}")
         else:
-            print(f"📤 Slack通知: {p['title']}")
+            print(f"📢 通知: {p['title']}")
 
 def main():
-    print("🔍 Selenium による新着案件チェック...")
     current_projects = fetch_projects()
     print(f"✅ 現在の案件数: {len(current_projects)}")
 
     last_projects = load_last_projects()
     last_titles = {p["title"] for p in last_projects}
-    new_projects = []
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    for p in current_projects:
-        if p["title"] not in last_titles:
-            p["date"] = today
-            new_projects.append(p)
+    new_projects = [
+        p for p in current_projects
+        if p["title"] not in last_titles or p["date"] != datetime.now().strftime("%Y-%m-%d")
+    ]
 
     print(f"🆕 新着: {len(new_projects)} 件")
 
     if new_projects:
-        send_to_slack(new_projects)
+        send_slack_notification(new_projects)
+        save_last_projects(current_projects)
     else:
         print("ℹ️ 新着はありませんでした。")
-
-    save_last_projects(current_projects)
 
 if __name__ == "__main__":
     main()
