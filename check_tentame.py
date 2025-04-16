@@ -4,79 +4,89 @@ import json
 import os
 from datetime import datetime
 
+# 通知用 Slack Webhook
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 TENTAME_URL = "https://www.tentame.net/project/"
+LAST_PROJECTS_FILE = "last_projects.json"
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-}
+
+def send_slack_notification(message, image_url=None):
+    payload = {
+        "attachments": [
+            {
+                "fallback": message,
+                "color": "#36a64f",
+                "text": message,
+            }
+        ]
+    }
+    if image_url:
+        payload["attachments"][0]["image_url"] = image_url
+
+    response = requests.post(SLACK_WEBHOOK_URL, json=payload)
+    response.raise_for_status()
+
 
 def fetch_projects():
-    response = requests.get(TENTAME_URL, headers=HEADERS)
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    response = requests.get(TENTAME_URL, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
-
-    project_items = soup.select(".project_list li a")
-
+    
     projects = []
-    for item in project_items:
-        url = "https://www.tentame.net" + item.get("href")
-        title = item.select_one(".project_name").text.strip()
+    for item in soup.select(".list_block"):
+        title_tag = item.select_one(".list_title")
+        if not title_tag:
+            continue
+        title = title_tag.text.strip()
         image_tag = item.select_one("img")
-        image_url = "https://www.tentame.net" + image_tag.get("src") if image_tag else None
+        image_url = image_tag["src"] if image_tag else None
+
         projects.append({
             "title": title,
-            "url": url,
             "image": image_url
         })
+
     return projects
 
+
 def load_last_projects():
-    if not os.path.exists("last_projects.json"):
+    if not os.path.exists(LAST_PROJECTS_FILE):
         return []
-    with open("last_projects.json", "r", encoding="utf-8") as f:
+    with open(LAST_PROJECTS_FILE, "r") as f:
         try:
             return json.load(f)
         except json.JSONDecodeError:
             return []
 
+
 def save_projects(projects):
-    with open("last_projects.json", "w", encoding="utf-8") as f:
+    with open(LAST_PROJECTS_FILE, "w") as f:
         json.dump(projects, f, ensure_ascii=False, indent=2)
 
-def notify_slack(new_projects):
-    for proj in new_projects:
-        payload = {
-            "blocks": [
-                {"type": "section", "text": {"type": "mrkdwn", "text": f"*🆕 新着案件:*\n*{proj['title']}*\n<{proj['url']}|案件を見る>"}},
-            ]
-        }
-        if proj["image"]:
-            payload["blocks"].append({
-                "type": "image",
-                "image_url": proj["image"],
-                "alt_text": proj["title"]
-            })
-
-        requests.post(SLACK_WEBHOOK_URL, json=payload)
 
 def main():
     print("🔍 新着案件を確認中...")
     current_projects = fetch_projects()
-    last_projects = load_last_projects()
-
-    last_titles = {proj["title"] for proj in last_projects}
-    new_projects = [proj for proj in current_projects if proj["title"] not in last_titles]
-
     print(f"✅ 現在の案件数: {len(current_projects)}")
-    print(f"🆕 新着: {len(new_projects)} 件")
 
+    last_projects = load_last_projects()
+    last_titles = {p["title"] for p in last_projects}
+    new_projects = [p for p in current_projects if p["title"] not in last_titles]
+
+    print(f"🆕 新着: {len(new_projects)} 件")
     if new_projects:
-        notify_slack(new_projects)
-        save_projects(current_projects)
-        print("📢 Slack に通知しました。")
+        for project in new_projects:
+            today = datetime.now().strftime("%Y-%m-%d")
+            message = f"🆕 新着案件: {project['title']} ({today})"
+            send_slack_notification(message, project.get("image"))
     else:
         print("ℹ️ 新着はありませんでした。")
+
+    save_projects(current_projects)
+
 
 if __name__ == "__main__":
     main()
