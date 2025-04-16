@@ -1,4 +1,4 @@
-selenium
-webdriver-manager
-beautifulsoup4
 requests
+beautifulsoup4
+slack_sdk
+python-dotenv
