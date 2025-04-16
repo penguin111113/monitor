@@ -1,110 +1,89 @@
-import os
 import json
+import os
 import time
+import datetime
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
 
-URL = "https://www.tentame.net/project/"
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+TARGET_URL = "https://www.tentame.net/project/"
+LAST_PROJECTS_FILE = "last_projects.json"
 
 def fetch_projects():
-    print("🔍 Selenium による新着案件チェック...")
-
     options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
 
-    driver.get(URL)
-    time.sleep(3)  # JS読み込み待ち（必要に応じて調整）
+    print("🔍 ページ読み込み中...")
+    driver.get(TARGET_URL)
+    time.sleep(5)
+
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    driver.quit()
 
     projects = []
-    cards = driver.find_elements(By.CLASS_NAME, "project-box")
-
-    for card in cards:
-        try:
-            title_elem = card.find_element(By.CLASS_NAME, "title")
-            title = title_elem.text.strip()
-
-            url = title_elem.get_attribute("href") or URL
-            image = card.find_element(By.TAG_NAME, "img").get_attribute("src")
-            date = card.find_element(By.CLASS_NAME, "project-box__date").text.strip()
-
+    for item in soup.select(".project-item"):
+        name_tag = item.select_one(".project-name")
+        point_tag = item.select_one(".project-pt")
+        date_tag = item.select_one(".date")
+        if name_tag and point_tag and date_tag:
+            name = name_tag.text.strip()
+            point = point_tag.text.strip()
+            date = date_tag.text.strip()
             projects.append({
-                "title": title,
-                "url": url,
-                "image": image,
+                "name": name,
+                "point": point,
                 "date": date
             })
-        except Exception as e:
-            print(f"❌ パース失敗: {e}")
-            continue
-
-    driver.quit()
     return projects
 
 def load_last_projects():
-    if not os.path.exists("last_projects.json"):
+    if not os.path.exists(LAST_PROJECTS_FILE):
         return []
-    with open("last_projects.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    with open(LAST_PROJECTS_FILE, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            print("⚠️ JSON読み込みに失敗しました。空のリストを返します。")
+            return []
 
 def save_current_projects(projects):
-    with open("last_projects.json", "w", encoding="utf-8") as f:
+    with open(LAST_PROJECTS_FILE, "w", encoding="utf-8") as f:
         json.dump(projects, f, ensure_ascii=False, indent=2)
 
-def detect_new_projects(current, last):
-    new = []
-    for p in current:
-        match = next((lp for lp in last if lp["title"] == p["title"]), None)
-        if match is None or match["date"] != p["date"]:
-            new.append(p)
-    return new
-
-def send_slack_notification(projects):
-    if not projects:
-        print("ℹ️ 新着はありませんでした。")
+def notify_new_projects(new_projects):
+    if not SLACK_WEBHOOK_URL:
+        print("⚠️ Slack Webhook URL が設定されていません")
         return
-
-    print(f"🆕 新着: {len(projects)} 件")
-
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-    if not webhook_url:
-        print("❌ Slack webhook URL が未設定です。")
-        return
-
-    for p in projects:
-        message = {
-            "attachments": [
-                {
-                    "fallback": p["title"],
-                    "color": "#36a64f",
-                    "title": p["title"],
-                    "title_link": p["url"],
-                    "text": f"🗓 表示日: {p['date']}",
-                    "image_url": p["image"]
-                }
-            ]
-        }
-        response = requests.post(webhook_url, json=message)
+    for p in new_projects:
+        message = f"🆕 新着案件！\n*{p['name']}*\n{p['point']}\n📅 {p['date']}"
+        payload = {"text": message}
+        response = requests.post(SLACK_WEBHOOK_URL, json=payload)
         if response.status_code != 200:
-            print(f"❌ Slack通知失敗: {response.status_code} - {response.text}")
+            print(f"❌ Slack通知に失敗しました: {response.status_code} {response.text}")
 
 def main():
+    print("🔍 Selenium による新着案件チェック...")
     current_projects = fetch_projects()
     print(f"✅ 現在の案件数: {len(current_projects)}")
 
     last_projects = load_last_projects()
-    new_projects = detect_new_projects(current_projects, last_projects)
+    last_names_dates = {(p['name'], p['date']) for p in last_projects}
+    new_projects = [p for p in current_projects if (p['name'], p['date']) not in last_names_dates]
 
-    send_slack_notification(new_projects)
-    save_current_projects(current_projects)
+    print(f"🆕 新着: {len(new_projects)} 件")
+    if new_projects:
+        notify_new_projects(new_projects)
+        save_current_projects(current_projects)
+    else:
+        print("ℹ️ 新着はありませんでした。")
 
 if __name__ == "__main__":
     main()
