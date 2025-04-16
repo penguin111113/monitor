@@ -1,26 +1,34 @@
-name: Monitor Tentame
+name: Check Tentame Projects
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 毎時00分に実行
-  workflow_dispatch:
+    - cron: "0 * * * *"  # 毎時0分（1時間ごと）
+  workflow_dispatch:     # 手動実行も可能
 
 jobs:
   check:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v3
+      - name: チェックアウト
+        uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Python セットアップ
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install dependencies
+      - name: 依存関係のインストール
         run: pip install -r requirements.txt
 
-      - name: Run monitor
+      - name: 新着案件をチェック
+        run: python check_tentame.py
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python check_tentame.py
+
+      - name: 差分を保存
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add last_projects.json
+          git commit -m "📝 Update project list [skip ci]" || echo "No changes to commit"
+          git push
