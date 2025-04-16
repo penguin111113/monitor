@@ -4,6 +4,7 @@ import os
 import requests
 from datetime import datetime
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
@@ -19,7 +20,9 @@ def fetch_projects():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
-    driver = webdriver.Chrome(executable_path=ChromeDriverManager().install(), options=options)
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+
     driver.get("https://www.tentame.net/project/")
     time.sleep(5)  # JavaScriptでの描画を待機（必要に応じて調整）
 
